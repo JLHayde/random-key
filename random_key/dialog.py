@@ -1,4 +1,7 @@
 from .ui.dialog import AppDialog
 
 
-c
+class RandomKeyDialog(AppDialog):
+
+    def __init__(self):
+        super().__init__()

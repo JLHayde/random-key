@@ -34,57 +34,10 @@ from pynput import mouse
 
 from PySide6.QtCore import QSettings
 
+from .widgets import SearchableStrictComboBox
+from .item_widget import ItemParameterWidget
+
 settings = QSettings("MCTools", "RandomKeys")
-
-
-class SearchableStrictComboBox(QComboBox):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setEditable(True)
-        self.setInsertPolicy(QComboBox.NoInsert)
-
-        self.setMinimumWidth(120)
-
-        # Item model
-        self.model_ = QStandardItemModel(self)
-        self.setModel(self.model_)
-
-        # Filtering model
-        self.proxy_model = QSortFilterProxyModel(self)
-        self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.proxy_model.setSourceModel(self.model_)
-
-        # Completer setup
-        self.completer = QCompleter(self.proxy_model, self)
-        self.completer.setCompletionMode(QCompleter.PopupCompletion)
-        self.completer.setCaseSensitivity(Qt.CaseInsensitive)
-        self.setCompleter(self.completer)
-
-        # Link text input to filtering
-        self.lineEdit().textEdited.connect(self.proxy_model.setFilterFixedString)
-
-        # Validate text on focus out or enter
-        self.lineEdit().editingFinished.connect(self.validate_input)
-
-    def add_item(self, text, icon_path=None):
-        item = QStandardItem(text)
-        if icon_path:
-            item.setIcon(QIcon(icon_path))
-        self.model_.appendRow(item)
-
-    def validate_input(self):
-        text = self.currentText()
-        match_found = False
-
-        for row in range(self.model_.rowCount()):
-            if self.model_.item(row).text().lower() == text.lower():
-                self.setCurrentIndex(row)
-                match_found = True
-                break
-
-        if not match_found:
-            self.setCurrentIndex(-1)
-            self.lineEdit().clear()
 
 
 class WFC1D:
@@ -198,7 +151,7 @@ class AppDialog(QWidget):
         self._current_index = 0
         self._max_index = 0
 
-        self._sliders: list[QSlider] = []
+        self._slider_widgets: list[QSlider] = []
         self._min_counts: list[QSpinBox] = []
         self._max_counts: list[QSpinBox] = []
         self._no_next: list[QLineEdit] = []
@@ -282,7 +235,7 @@ class AppDialog(QWidget):
             item_form_layout.addRow("Avoid:", no_next)
             item_form_layout.addRow("Enabled:", checkbox)
 
-            self._sliders.append(slider)
+            self._slider_widgets.append(slider)
             self._min_counts.append(min_amount)
             self._max_counts.append(max_amount)
             self._no_next.append(no_next)
@@ -311,7 +264,7 @@ class AppDialog(QWidget):
         bottom_frame.setFrameShape(QFrame.StyledPanel)
         bottom_frame.setObjectName("bottomformFrame")  # so we can style it
 
-        self._sliders[0].valueChanged.connect(self.current_bias)
+        self._slider_widgets[0].valueChanged.connect(self.current_bias)
 
         # Add Max Height spin box (no behavior attached)
         form_layout = QFormLayout()
@@ -401,7 +354,7 @@ class AppDialog(QWidget):
         for min_widget, max_widget, slider, item, checkbox in zip(
             self._min_counts,
             self._max_counts,
-            self._sliders,
+            self._slider_widgets,
             self._items,
             self._checkboxes,
         ):
@@ -434,9 +387,9 @@ class AppDialog(QWidget):
             label.setPixmap(pixmap)
             self.prewiew_layout.addWidget(label)
 
-    def _save_values(self):
+    def _save_values(self) -> None:
 
-        settings.setValue("sliders", [x.value() for x in self._sliders])
+        settings.setValue("sliders", [x.value() for x in self._slider_widgets])
         settings.setValue("enabled", [x.isChecked() for x in self._checkboxes])
         settings.setValue("mins", [x.value() for x in self._min_counts])
         settings.setValue("max", [x.value() for x in self._max_counts])
@@ -444,16 +397,20 @@ class AppDialog(QWidget):
         settings.setValue("max_length", self.max_height_spinbox.value())
         settings.setValue("items", [x.currentText() for x in self._items])
 
-    def _restore_values(self):
+    def _restore_values(self) -> None:
+        """
+        Restores
+        :return:
+        """
 
         for x, val in enumerate(settings.value("sliders", type=list)):
             print(val)
-            self._sliders[x].setValue(int(val))
+            self._slider_widgets[x].setValue(int(val))
         print("_" * 10)
         for x, val in enumerate(settings.value("enabled", type=list)):
             val = val == "true"
             self._checkboxes[x].setChecked(val)
-            self._sliders[x].setEnabled(val)
+            self._slider_widgets[x].setEnabled(val)
         print("_" * 10)
         for x, val in enumerate(settings.value("mins", type=list)):
             print(val)
@@ -473,12 +430,12 @@ class AppDialog(QWidget):
             print("-", val)
             self._items[x].setCurrentText(val)
 
-        # for i, slider in enumerate(self._sliders):
+        # for i, slider in enumerate(self._slider_widgets):
         #    val =
         #    slider.setValue(val)
 
     #
-    # settings.setValue("sliders", [x.setValue() for x in self._sliders])
+    # settings.setValue("sliders", [x.setValue() for x in self._slider_widgets])
     # settings.setValue("enabled", [x.isChecked() for x in self._checkboxes])
     # settings.setValue("mins", [x.value() for x in self._min_counts])
     # settings.setValue("max", [x.value() for x in self._max_counts])
@@ -563,14 +520,14 @@ class AppDialog(QWidget):
         keyboard.release(key)
 
     def current_bias(self, *args) -> list[int]:
-        return [i.value() for i in self._sliders if i.isEnabled()]
+        return [i.value() for i in self._slider_widgets if i.isEnabled()]
 
     def build_rule(self) -> list[int]:
 
         rules = {}
         probabilities = {}
 
-        for x, slider in enumerate(self._sliders):
+        for x, slider in enumerate(self._slider_widgets):
             if not slider.isEnabled():
                 continue
 
