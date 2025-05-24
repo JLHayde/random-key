@@ -1,32 +1,14 @@
-import os
-import pathlib
-import random
-import keyboard
-from copy import deepcopy, copy
-import random
-import pprint
-
 from PySide6.QtWidgets import (
-    QApplication,
-    QWidget,
-    QLabel,
-    QSlider,
-    QVBoxLayout,
-    QHBoxLayout,
-    QSpinBox,
-    QFormLayout,
-    QCheckBox,
-    QPushButton,
-    QLineEdit,
-    QFrame,
-    QScrollArea,
     QComboBox,
     QCompleter,
 )
 
-from PySide6.QtGui import QPixmap, QStandardItemModel, QIcon, QStandardItem
-from PySide6.QtCore import Qt, QPoint, QSettings, QSortFilterProxyModel
-import sys
+from PySide6.QtGui import (
+    QStandardItemModel,
+    QIcon,
+    QStandardItem,
+)
+from PySide6.QtCore import Qt, QSortFilterProxyModel
 
 
 class SearchableStrictComboBox(QComboBox):
@@ -57,12 +39,19 @@ class SearchableStrictComboBox(QComboBox):
 
         # Validate text on focus out or enter
         self.lineEdit().editingFinished.connect(self.validate_input)
+        self.setMinimumWidth(140)
 
     def add_item(self, text, icon_path=None):
         item = QStandardItem(text)
-        if icon_path:
-            item.setIcon(QIcon(icon_path))
         self.model_.appendRow(item)
+
+    def set_icon(self, index, icon: QIcon):
+        self.model_.item(index).setIcon(icon)
+        self.model_.dataChanged.emit(
+            self.model_.index(index, index),
+            self.model_.index(index, index),
+            Qt.DecorationRole,
+        )
 
     def validate_input(self):
         text = self.currentText()
