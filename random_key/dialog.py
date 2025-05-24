@@ -3,7 +3,7 @@ import pprint
 
 from PySide6.QtWidgets import QLabel, QWidget
 from PySide6.QtGui import QPixmap, QIcon
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, QThread, QObject, Signal, Slot
 
 from pynput import mouse
 import keyboard
@@ -11,9 +11,32 @@ import keyboard
 from .ui.dialog import AppDialog
 from .ui.item_widget import ItemParameterWidget
 from .sequences import WFC1D
-from .constants import APP_NAME, GROUP_NAME
+from .constants import APP_NAME, GROUP_NAME, REMAP_ITEMS
 
 settings = QSettings(GROUP_NAME, APP_NAME)
+
+
+class ItemIconWorker(QObject):
+    """
+    Generates the palette as a QIcon's Emits signal
+    when each icon has be been generated.
+    """
+
+    item_ready = Signal(int, QIcon)
+    finished = Signal()
+
+    def __init__(self, item_mappings: dict, parent=None):
+        super().__init__()
+
+        self.item_mappings = item_mappings
+
+    def run(self):
+
+        for k, v in enumerate(list(self.item_mappings.values())):
+            icon = QIcon(v)
+            self.item_ready.emit(k, icon)
+
+        self.finished.emit()
 
 
 class RandomKeyDialog(QWidget):
@@ -41,10 +64,12 @@ class RandomKeyDialog(QWidget):
             col = index % cols
             self.add_item_widget(row, col)
 
-        for k, v in enumerate(list(self.palette.values())):
-            icon = QIcon(v)
-            for widget in self._item_widgets:
-                widget.selector.set_icon(k, icon)
+        # Threads and workers
+        self._icon_thread = QThread()
+        self._icon_worker = ItemIconWorker(self.palette)
+
+        self._preview_thread = QThread()
+        self._preview_worker = ItemIconWorker(self.palette)
 
         # UI Setup
         self._restore_values()
@@ -56,6 +81,13 @@ class RandomKeyDialog(QWidget):
         self.ui.buffer_button.clicked.connect(self._generate_buffer)
         for i in self._item_widgets:
             i.values_changed.connect(self.on_values_changed)
+
+        # Setup Icons for item selector in thread
+        self._icon_worker.moveToThread(self._icon_thread)
+        self._icon_thread.started.connect(self._icon_worker.run)
+        self._icon_worker.item_ready.connect(self.on_item_icons_generated)
+        self._icon_worker.finished.connect(self._icon_thread.quit)
+        self._icon_thread.start()
 
         self.setLayout(self.ui.outer_layout)
         self.resize(700, 400)
@@ -83,13 +115,33 @@ class RandomKeyDialog(QWidget):
         palette_dir = os.path.join(
             os.path.dirname(__file__), os.pardir, "resources", "palette"
         )
-        palette = {}
+        palette = []
 
         for i in os.listdir(palette_dir):
             f_name = i.split(".")[0]
+            f_name = REMAP_ITEMS.get(f_name, f_name)
             f_name = f_name.replace("_", " ").title()
-            palette[f_name] = os.path.join(palette_dir, i)
-        return palette
+
+            full_path = os.path.join(palette_dir, i)
+            palette.append((f_name, full_path))
+
+        # Sort by the remapped and formatted name
+        palette.sort(key=lambda x: x[0])
+
+        palette_dict = {name: path for name, path in palette}
+        return palette_dict
+
+    def on_item_icons_generated(self, index: int, icon: QIcon) -> None:
+        """
+        Callback method for item icons generated in thread. Adds them to
+        each item's, Item selector.
+        :param index:
+        :param icon:
+        :return:
+        """
+
+        for widget in self._item_widgets:
+            widget.selector.set_icon(index, icon)
 
     def add_item_widget(self, row: int, column: int) -> None:
         """
@@ -118,7 +170,7 @@ class RandomKeyDialog(QWidget):
         settings.setValue("avoids", [x.no_next.text() for x in self._item_widgets])
         settings.setValue("max_length", self.ui.max_height_spinbox.value())
         settings.setValue(
-            "items", [x.selector.currentText() for x in self._item_widgets]
+            "items", [x.selector.currentIndex() for x in self._item_widgets]
         )
         print("Saved Sessions UI values")
 
@@ -140,9 +192,8 @@ class RandomKeyDialog(QWidget):
             self._item_widgets[x].max_amount.setValue(int(val))
         for x, val in enumerate(settings.value("avoids")):
             self._item_widgets[x].no_next.setText(val)
-        for x, val in enumerate(settings.value("items")):
-            print(val)
-            self._item_widgets[x].selector.setCurrentText(val)
+        for x, val in enumerate(settings.value("items", type=list)):
+            self._item_widgets[x].selector.setCurrentIndex(int(val))
 
         print("Restored Settings")
 

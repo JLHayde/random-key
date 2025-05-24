@@ -47,11 +47,11 @@ class SearchableStrictComboBox(QComboBox):
 
     def set_icon(self, index, icon: QIcon):
         self.model_.item(index).setIcon(icon)
-        self.model_.dataChanged.emit(
-            self.model_.index(index, index),
-            self.model_.index(index, index),
-            Qt.DecorationRole,
-        )
+        # self.model_.dataChanged.emit(
+        #    self.model_.index(index, index),
+        #    self.model_.index(index, index),
+        #    Qt.DecorationRole,
+        # )
 
     def validate_input(self):
         text = self.currentText()
