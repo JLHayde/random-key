@@ -1,12 +1,21 @@
 import os
 import pprint
 
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import (
+    QLabel,
+    QWidget,
+    QMainWindow,
+    QMenu,
+    QMenuBar,
+    QVBoxLayout,
+    QMessageBox,
+)
 from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtCore import Qt, QSettings, QThread, QObject, Signal, Slot
 
 from pynput import mouse
 import keyboard
+
 
 from .ui.dialog import AppDialog
 from .ui.item_widget import ItemParameterWidget
@@ -14,6 +23,8 @@ from .sequences import WFC1D
 from .constants import APP_NAME, GROUP_NAME, REMAP_ITEMS
 
 settings = QSettings(GROUP_NAME, APP_NAME)
+
+from random_key import __version__
 
 
 class ItemIconWorker(QObject):
@@ -39,24 +50,23 @@ class ItemIconWorker(QObject):
         self.finished.emit()
 
 
-class RandomKeyDialog(QWidget):
+class RandomKeyDialog(QMainWindow):
 
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Random Block Selector")
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
-
         self.ui = AppDialog()
 
         self._item_widgets: list[ItemParameterWidget] = []
+        self._current_index = 0
+        self._max_index = 0
         self.active = True
         self.buffer: list[tuple[str, int]] = []
         self.palette = self._build_palette()
 
-        # Mouse Lister
+        # Mouse Listener
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
-        self.mouse_listener.start()
 
         rows, cols = 1, 9
         for index in range(0, rows * cols):
@@ -79,6 +89,7 @@ class RandomKeyDialog(QWidget):
         # Connections
         self.ui.max_height_spinbox.valueChanged.connect(self._generate_buffer)
         self.ui.buffer_button.clicked.connect(self._generate_buffer)
+        self.ui.stop_start_button.clicked.connect(self.on_stop_start_button)
         for i in self._item_widgets:
             i.values_changed.connect(self.on_values_changed)
 
@@ -89,8 +100,49 @@ class RandomKeyDialog(QWidget):
         self._icon_worker.finished.connect(self._icon_thread.quit)
         self._icon_thread.start()
 
-        self.setLayout(self.ui.outer_layout)
-        self.resize(700, 400)
+        self.setCentralWidget(self.ui)
+        self.create_menu_bar()
+
+    def on_stop_start_button(self, state: bool):
+        """
+        Callback for when the start button is clicked.
+        Enables or disables the mouse listener.
+        :param state:
+        :return:
+        """
+
+        if state:
+            self.ui.stop_start_button.setText("Stop")
+            self.mouse_listener = mouse.Listener(on_click=self.on_click)
+            self.mouse_listener.start()
+        else:
+            self.ui.stop_start_button.setText("Start")
+            self.mouse_listener.stop()
+
+        for i in self._item_widgets:
+            i.set_active(not state)
+
+    def create_menu_bar(self):
+        """
+        Build the menu bar.
+        :return:
+        """
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu("File")
+
+        save_action = file_menu.addAction("Save settings")
+        save_action.triggered.connect(self._save_values)
+
+        restore_action = file_menu.addAction("Restore last settings")
+        restore_action.triggered.connect(self._restore_values)
+
+        exit_action = file_menu.addAction("Exit")
+        exit_action.triggered.connect(self.close)
+
+        help_menu = menu_bar.addMenu("Help")
+        about_action = help_menu.addAction("About")
+        about_action.triggered.connect(self.show_about)
 
     # Qt Events
     def closeEvent(self, event) -> None:
@@ -125,11 +177,18 @@ class RandomKeyDialog(QWidget):
             full_path = os.path.join(palette_dir, i)
             palette.append((f_name, full_path))
 
-        # Sort by the remapped and formatted name
         palette.sort(key=lambda x: x[0])
 
         palette_dict = {name: path for name, path in palette}
         return palette_dict
+
+    def show_about(self):
+        QMessageBox.about(
+            self,
+            "About",
+            "App to Define a rule set to randomly select blocks.\nVersion: %s"
+            % __version__,
+        )
 
     def on_item_icons_generated(self, index: int, icon: QIcon) -> None:
         """
@@ -208,8 +267,8 @@ class RandomKeyDialog(QWidget):
         images: list[str] = [self.palette.get(block) for block, _ in self.buffer]
 
         # Clear the layout
-        while self.ui.prewiew_layout.count():
-            item = self.ui.prewiew_layout.takeAt(0)
+        while self.ui.preview_layout.count():
+            item = self.ui.preview_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
@@ -221,11 +280,15 @@ class RandomKeyDialog(QWidget):
             label.setFixedSize(image_size, image_size)
             pixmap = QPixmap(path).scaled(image_size, image_size, Qt.IgnoreAspectRatio)
             label.setPixmap(pixmap)
-            self.ui.prewiew_layout.addWidget(label)
+            self.ui.preview_layout.addWidget(label)
 
     def on_values_changed(self, widget):
+        """
+        Callback method for any items widget values changed.
+        :param widget:
+        :return:
+        """
 
-        # if widget.is_active:
         self._generate_buffer()
 
     def _generate_buffer(self, *args) -> None:
@@ -235,7 +298,6 @@ class RandomKeyDialog(QWidget):
         :return:
         """
 
-        self._save_values()
         self.buffer = self.build_rule()
         self._current_index = 0
         self.ui.progress.setRange(0, len(self.buffer))
@@ -284,31 +346,49 @@ class RandomKeyDialog(QWidget):
             result = wfc.run()
             return result
 
-    def update_displays(self) -> None:
+    @property
+    def last_item(self) -> (str, int):
 
         if self._current_index > len(self.buffer) - 1:
-            pass
+            return "", 0
         else:
+            return self.buffer[self._current_index - 1]
 
-            item, cur = self.buffer[self._current_index]
+    @property
+    def current_item(self) -> (str, int):
 
-            current_text = "Key: %s, Item: %s" % (cur, item)
-            self.ui.current_key.setText(current_text)
-            self.ui.progress.setValue(self._current_index)
+        if self._current_index > len(self.buffer) - 1:
+            return "", 0
+        else:
+            return self.buffer[self._current_index]
+
+    @property
+    def next_item(self) -> (str, int):
 
         if self._current_index + 1 > len(self.buffer) - 1:
-            self.ui.next_key.setText("")
+            return "", 0
         else:
-            key = str(self.buffer[self._current_index + 1][1])
-            self.ui.next_key.setText(key)
+            return self.buffer[self._current_index + 1]
 
-        # for x, i in enumerate(self._item_widgets):
-        #    if x == self.buffer[self._current_index][0]:
-        #        i.display_active(True)
-        #
-        #    else:
-        #        i.display_active(False)
-        # self.draw_palette_from_buffer()
+    def update_displays(self) -> None:
+
+        current_item, current_index = self.current_item
+        next_item, next_index = self.next_item
+
+        icon = QIcon(self.palette.get(current_item))
+        pixmap = icon.pixmap(32, 32)
+
+        if current_item == next_item:
+            self.ui.current_key.setPixmap(pixmap)
+            self.ui.next_key.setPixmap(pixmap)
+        else:
+            next_icon = QIcon(self.palette.get(next_item))
+            next_pixmap = next_icon.pixmap(32, 32)
+
+            self.ui.current_key.setPixmap(pixmap)
+            self.ui.next_key.setPixmap(next_pixmap)
+
+        self.ui.progress.setValue(self._current_index)
 
     def on_click(self, x: int, y: int, button: mouse.Button, pressed: bool) -> None:
         """

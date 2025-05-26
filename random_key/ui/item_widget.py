@@ -14,6 +14,15 @@ from .widgets import SearchableStrictComboBox
 
 class ItemParameterWidget(QFrame):
 
+    default_style = """
+        #formFrame {
+            border: 2px solid #6894b0;
+            border-radius: 8px;
+            padding: 1px;
+            background-color: #474747;
+        }
+        """
+
     values_changed = Signal(object)
     """When any of the widgets values change emits the object and its value"""
 
@@ -23,6 +32,7 @@ class ItemParameterWidget(QFrame):
         self.setFrameShape(QFrame.StyledPanel)
         self.setObjectName("formFrame")
 
+        self._is_disabled = False
         self._is_active = True
 
         item_form_layout = QFormLayout()
@@ -56,16 +66,7 @@ class ItemParameterWidget(QFrame):
         self.setLayout(item_form_layout)
         self.setFrameShape(QFrame.StyledPanel)
 
-        self.setStyleSheet(
-            """
-        #formFrame {
-            border: 2px solid #4A90E2;
-            border-radius: 8px;
-            padding: 1px;
-            background-color: #474747;
-        }
-        """
-        )
+        self.setStyleSheet(self.default_style)
 
         self.checkbox.stateChanged.connect(
             lambda state, s=self.slider: s.setEnabled(state == 2)
@@ -108,7 +109,7 @@ class ItemParameterWidget(QFrame):
             self.setStyleSheet(
                 """
         #formFrame {
-            border: 2px solid #4A90E2;
+            border: 2px solid #6894b0;
             border-radius: 8px;
             padding: 1px;
             background-color: #474747;
@@ -119,3 +120,19 @@ class ItemParameterWidget(QFrame):
     @property
     def is_active(self):
         return True if self.checkbox.isChecked() else False
+
+    def set_disabled(self, value):
+        self._is_disabled = value
+
+    def set_active(self, value):
+
+        widgets = [
+            self.selector,
+            self.slider,
+            self.checkbox,
+            self.min_amount,
+            self.max_amount,
+        ]
+
+        for widget in widgets:
+            widget.setEnabled(value)
