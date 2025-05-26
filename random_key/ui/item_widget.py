@@ -26,11 +26,12 @@ class ItemParameterWidget(QFrame):
     values_changed = Signal(object)
     """When any of the widgets values change emits the object and its value"""
 
-    def __init__(self, parent=None):
+    def __init__(self, key, parent=None):
         super().__init__(parent)
 
         self.setFrameShape(QFrame.StyledPanel)
         self.setObjectName("formFrame")
+        self._key = str(key)
 
         self._is_disabled = False
         self._is_active = True
@@ -56,7 +57,7 @@ class ItemParameterWidget(QFrame):
 
         self.no_next = QLineEdit()
 
-        item_form_layout.addRow("item", self.selector)
+        item_form_layout.addRow("Key %s" % self._key, self.selector)
         item_form_layout.addRow("Prob", self.slider)
         item_form_layout.addRow("Min", self.min_amount)
         item_form_layout.addRow("Max", self.max_amount)

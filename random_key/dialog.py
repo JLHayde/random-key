@@ -1,21 +1,11 @@
 import os
-import pprint
 
-from PySide6.QtWidgets import (
-    QLabel,
-    QWidget,
-    QMainWindow,
-    QMenu,
-    QMenuBar,
-    QVBoxLayout,
-    QMessageBox,
-)
+from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox
 from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtCore import Qt, QSettings, QThread, QObject, Signal, Slot
 
 from pynput import mouse
 import keyboard
-
 
 from .ui.dialog import AppDialog
 from .ui.item_widget import ItemParameterWidget
@@ -68,11 +58,11 @@ class RandomKeyDialog(QMainWindow):
         # Mouse Listener
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
 
-        rows, cols = 1, 9
+        rows, cols = 3, 3
         for index in range(0, rows * cols):
             row = index // cols
             col = index % cols
-            self.add_item_widget(row, col)
+            self.add_item_widget(row, col, index)
 
         # Threads and workers
         self._icon_thread = QThread()
@@ -100,6 +90,7 @@ class RandomKeyDialog(QMainWindow):
         self._icon_worker.finished.connect(self._icon_thread.quit)
         self._icon_thread.start()
 
+        # self.reposition_widgets()
         self.setCentralWidget(self.ui)
         self.create_menu_bar()
 
@@ -143,6 +134,22 @@ class RandomKeyDialog(QMainWindow):
         help_menu = menu_bar.addMenu("Help")
         about_action = help_menu.addAction("About")
         about_action.triggered.connect(self.show_about)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.reposition_widgets()
+
+    def reposition_widgets(self):
+        for i in reversed(range(self.ui.sliders_layout.count())):
+            item = self.ui.sliders_layout.itemAt(i)
+            self.ui.sliders_layout.removeWidget(item.widget())
+        width = self.size().width()
+        widget_width = 220
+        columns = max(1, width // widget_width)
+        for index, widget in enumerate(self._item_widgets):
+            row = index // columns
+            col = index % columns
+            self.ui.sliders_layout.addWidget(widget, row, col)
 
     # Qt Events
     def closeEvent(self, event) -> None:
@@ -202,12 +209,12 @@ class RandomKeyDialog(QMainWindow):
         for widget in self._item_widgets:
             widget.selector.set_icon(index, icon)
 
-    def add_item_widget(self, row: int, column: int) -> None:
+    def add_item_widget(self, row: int, column: int, index: int) -> None:
         """
         Add item_widget.ItemParameterWidget widget to the Items Layout
         :return:
         """
-        item_params_widget = ItemParameterWidget()
+        item_params_widget = ItemParameterWidget(index + 1)
         item_params_widget.add_palette_items(self.palette)
 
         self._item_widgets.append(item_params_widget)
