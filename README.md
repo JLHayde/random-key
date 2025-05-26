@@ -23,6 +23,8 @@ The preview bar can be used to try different palette combinations.
 + Avoid: Name of the item, that it should avoid being next to.
 + Max Height: How long the sequence should be.
 
+## Sessions
+The current can be saved from File -> Save. Settings are restored on launch.
 
 # Dev
 Activate the conda env using the `environment.yml` to install python and packages.
