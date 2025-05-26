@@ -21,6 +21,7 @@ The preview bar can be used to try different palette combinations.
 + Min: How likely this will occur in sequence
 + Max: How many this will occur in sequence
 + Avoid: Name of the item, that it should avoid being next to.
++ Max Height: How long the sequence should be.
 
 
 # Dev
