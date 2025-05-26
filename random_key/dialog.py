@@ -72,7 +72,10 @@ class RandomKeyDialog(QMainWindow):
         self._preview_worker = ItemIconWorker(self.palette)
 
         # UI Setup
-        self._restore_values()
+        try:
+            self._restore_values()
+        except Exception:
+            pass
         self._generate_buffer()
         self.draw_palette_from_buffer()
 
