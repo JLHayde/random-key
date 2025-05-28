@@ -89,6 +89,11 @@ class ItemParameterWidget(QFrame):
         self.selector.currentTextChanged.connect(self.dummy)
         self.checkbox.clicked.connect(self.dummy)
 
+    @property
+    def item_name(self):
+
+        return self.selector.currentText()
+
     def dummy(self, *args):
 
         self.values_changed.emit(self)

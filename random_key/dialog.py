@@ -1,4 +1,5 @@
 import os
+import pprint
 
 from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox
 from PySide6.QtGui import QPixmap, QIcon
@@ -9,7 +10,7 @@ import keyboard
 
 from .ui.dialog import AppDialog
 from .ui.item_widget import ItemParameterWidget
-from .sequences import WFC1D
+from .sequences import ItemSequence, BlockSequence
 from .constants import APP_NAME, GROUP_NAME, REMAP_ITEMS
 
 settings = QSettings(GROUP_NAME, APP_NAME)
@@ -52,8 +53,10 @@ class RandomKeyDialog(QMainWindow):
         self._current_index = 0
         self._max_index = 0
         self.active = True
-        self.buffer: list[tuple[str, int]] = []
+        self.buffer: list[str] = []
         self.palette = self._build_palette()
+
+        self.block_sequence = BlockSequence()
 
         # Mouse Listener
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
@@ -200,6 +203,10 @@ class RandomKeyDialog(QMainWindow):
             % __version__,
         )
 
+    def add_to_buffer(self, item: str):
+
+        self.buffer.append(item)
+
     def on_item_icons_generated(self, index: int, icon: QIcon) -> None:
         """
         Callback method for item icons generated in thread. Adds them to
@@ -274,7 +281,7 @@ class RandomKeyDialog(QMainWindow):
         """
 
         # Generate Paths
-        images: list[str] = [self.palette.get(block) for block, _ in self.buffer]
+        images: list[str] = [self.palette.get(block) for block in self.buffer]
 
         # Clear the layout
         while self.ui.preview_layout.count():
@@ -321,40 +328,29 @@ class RandomKeyDialog(QMainWindow):
         :return:
         """
 
-        rules = {}
-        probabilities = {}
+        items_list = []
 
         for x, item_widget in enumerate(self._item_widgets):
             if not item_widget.slider.isEnabled():
                 continue
 
-            item_name = item_widget.selector.currentText()
+            item_name = item_widget.item_name
             min_count = item_widget.min_amount.value()
             max_count = item_widget.max_amount.value()
-            no_next = [
-                int(avoid)
-                for avoid in item_widget.no_next.text().split(",")
-                if avoid.strip().isdigit()
-            ]
-            rule = {
-                "min_repeat": min_count,
-                "max_repeat": max_count,
-                "no_next": no_next,
-            }
+            no_next = [avoid for avoid in item_widget.no_next.text().split(",")]
 
-            rules[(item_name, x + 1)] = rule
-            probabilities[(item_name, x + 1)] = item_widget.slider.value()
+            item = ItemSequence(
+                item_name,
+                item_widget._key,
+                item_widget.slider.value(),
+                max_count,
+                min_count,
+                no_next,
+            )
+            items_list.append(item)
 
-        wfc = WFC1D(
-            length=self.ui.max_height_spinbox.value(),
-            rules=rules,
-            probabilities=probabilities,
-        )
-        if not rules:
-            return []
-        else:
-            result = wfc.run()
-            return result
+        seq = BlockSequence(items_list, self.ui.max_height_spinbox.value())
+        return seq.run()
 
     @property
     def last_item(self) -> (str, int):
@@ -382,8 +378,8 @@ class RandomKeyDialog(QMainWindow):
 
     def update_displays(self) -> None:
 
-        current_item, current_index = self.current_item
-        next_item, next_index = self.next_item
+        current_item = self.current_item
+        next_item = self.next_item
 
         icon = QIcon(self.palette.get(current_item))
         pixmap = icon.pixmap(32, 32)
@@ -426,9 +422,14 @@ class RandomKeyDialog(QMainWindow):
         if self._current_index > len(self.buffer) - 1:
             pass
         else:
-            key = str(self.buffer[self._current_index - 1][1])
+            key = self.get_key_for_item(self.buffer[self._current_index])
             self.simulate_keypress(key)
         self.update_displays()
+
+    def get_key_for_item(self, item: str) -> str:
+        for i in self._item_widgets:
+            if i.item_name == item:
+                return str(i._key)
 
     @staticmethod
     def simulate_keypress(key: str) -> None:

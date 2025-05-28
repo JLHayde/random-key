@@ -1,4 +1,8 @@
 import random
+from collections import defaultdict, Counter
+import math
+from dataclasses import dataclass, field
+from PySide6 import QtCore
 
 
 class WFC1D:
@@ -101,3 +105,105 @@ def generate_random_number(
     target_keys: list[int], weights: list[int], length: int
 ) -> int:
     return random.choices(target_keys, weights=weights, k=length)
+
+
+@dataclass
+class ItemSequence:
+    item_name: str
+    bound_key: str
+    probability: int
+    max_entropy: int
+    min_entropy: int
+    avoids: list
+
+    def avoid(self, other):
+        self.avoids.append(other)
+
+
+def weighted_bool_from_range(start: int, end: int) -> bool:
+    length = end - start + 1
+    probability = 1 / length
+    return random.random() < probability
+
+
+class BlockSequence(QtCore.QObject):
+
+    item_added = QtCore.Signal(str)
+
+    def __init__(self, items=[], length=1):
+        super().__init__()
+        self.items: list[ItemSequence] = items
+        self.length: int = length
+
+        self._items: dict[str, ItemSequence] = {i.item_name: i for i in items}
+
+        self._stop_flag = False
+
+    def set_params(self, items, length):
+        self.items = items
+        self.length = length
+
+    def stop(self):
+
+        self._stop_flag = True
+
+    def run(self):
+
+        self._stop_flag = False
+
+        sequence = []
+        index = 1
+
+        # Initialise a starting item
+        target_keys = [i.item_name for i in self.items]
+        weights = [i.probability for i in self.items]
+        current_item = random.choices(target_keys, weights=weights, k=1)[0]
+
+        min_item_entropy = self._items[current_item].min_entropy
+        max_item_entropy = self._items[current_item].max_entropy
+        current_avoids = self._items[current_item].avoids
+
+        last_item = None
+        last_item_avoids = []
+
+        sequence.append(current_item)
+        self.item_added.emit(sequence)
+        while len(sequence) <= self.length - 1 and not self._stop_flag:
+
+            # Check that current item does not neighbour last item
+            if last_item not in current_avoids and current_item not in last_item_avoids:
+
+                # add item if we below min entropy
+                if index <= min_item_entropy:
+                    sequence.append(current_item)
+                    self.item_added.emit(current_item)
+                    index += 1
+                    continue
+
+                elif index <= max_item_entropy:
+
+                    if weighted_bool_from_range(min_item_entropy, max_item_entropy):
+                        index = 1000000
+                        last_item = current_item
+                        last_item_avoids = current_avoids
+                    else:
+                        sequence.append(current_item)
+                        self.item_added.emit(current_item)
+                        index += 1
+                    continue
+
+                else:
+                    last_item = current_item
+                    last_item_avoids = current_avoids
+
+            # Reset current item so it's not the same as the last item
+            while current_item := random.choices(target_keys, weights=weights, k=1)[0]:
+                if current_item != last_item:
+                    break
+
+            min_item_entropy = self._items[current_item].min_entropy
+            max_item_entropy = self._items[current_item].max_entropy
+            current_avoids = self._items[current_item].avoids
+            index = 1
+
+        return sequence
