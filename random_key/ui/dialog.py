@@ -37,8 +37,10 @@ class AppDialog(QWidget):
         # Add Max Height spin box (no behavior attached)
         self.form_layout = QFormLayout()
         self.max_height_spinbox = QSpinBox()
-        self.max_height_spinbox.setRange(0, 512)
+        self.max_height_spinbox.setRange(0, 2048)
         self.max_height_spinbox.setValue(32)
+
+        self.required_layout = QHBoxLayout()
 
         self._drag_active = False
         self._drag_start_pos = QPoint()
@@ -54,6 +56,7 @@ class AppDialog(QWidget):
         self.form_layout.addRow("Max Height:", self.max_height_spinbox)
         self.form_layout.addRow("Current Key:", self.current_key)
         self.form_layout.addRow("Next Key:", self.next_key)
+        self.form_layout.addRow("Required:", self.required_layout)
         self.form_layout.addRow("Progress:", self.progress)
         self.form_layout.addRow("", self.buffer_button)
         self.form_layout.addRow("", self.stop_start_button)

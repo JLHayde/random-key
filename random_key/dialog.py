@@ -1,9 +1,11 @@
 import os
 import pprint
+import traceback
+from collections import defaultdict, OrderedDict
 
-from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox
-from PySide6.QtGui import QPixmap, QIcon
-from PySide6.QtCore import Qt, QSettings, QThread, QObject, Signal, Slot
+from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QVBoxLayout
+from PySide6.QtGui import QPixmap, QIcon, QPainter, QColor, QFont, QPainterPath, QPen
+from PySide6.QtCore import Qt, QSettings, QThread, QObject, Signal, QPointF
 
 from pynput import mouse
 import keyboard
@@ -55,8 +57,7 @@ class RandomKeyDialog(QMainWindow):
         self.active = True
         self.buffer: list[str] = []
         self.palette = self._build_palette()
-
-        self.block_sequence = BlockSequence()
+        self._block_counts = defaultdict(int)
 
         # Mouse Listener
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
@@ -74,13 +75,14 @@ class RandomKeyDialog(QMainWindow):
         self._preview_thread = QThread()
         self._preview_worker = ItemIconWorker(self.palette)
 
+        self.block_sequence_thread = QThread()
+        self.block_sequence = BlockSequence()
+
         # UI Setup
         try:
             self._restore_values()
         except Exception:
             pass
-        self._generate_buffer()
-        self.draw_palette_from_buffer()
 
         # Connections
         self.ui.max_height_spinbox.valueChanged.connect(self._generate_buffer)
@@ -94,7 +96,10 @@ class RandomKeyDialog(QMainWindow):
         self._icon_thread.started.connect(self._icon_worker.run)
         self._icon_worker.item_ready.connect(self.on_item_icons_generated)
         self._icon_worker.finished.connect(self._icon_thread.quit)
+        self._icon_worker.finished.connect(self.on_icons_built)
         self._icon_thread.start()
+
+        self._generate_buffer()
 
         # self.reposition_widgets()
         self.setCentralWidget(self.ui)
@@ -142,10 +147,20 @@ class RandomKeyDialog(QMainWindow):
         about_action.triggered.connect(self.show_about)
 
     def resizeEvent(self, event):
+        """
+        Re-implement Qt resizeEvent
+        :param event:
+        :return:
+        """
         super().resizeEvent(event)
         self.reposition_widgets()
 
     def reposition_widgets(self):
+        """
+        Callback from resizeEvent to reposition widgets fit into
+        the windows layout.
+        :return:
+        """
         for i in reversed(range(self.ui.sliders_layout.count())):
             item = self.ui.sliders_layout.itemAt(i)
             self.ui.sliders_layout.removeWidget(item.widget())
@@ -157,6 +172,32 @@ class RandomKeyDialog(QMainWindow):
             col = index % columns
             self.ui.sliders_layout.addWidget(widget, row, col)
 
+    def setup_sequence_worker(self):
+        """
+        Setup Threads and workers and their Signal. Allows for restarting and
+        stopping of threads
+        :return:
+        """
+
+        self.block_sequence.stop()
+        self.block_sequence_thread.quit()
+        self.block_sequence_thread.wait()
+
+        self.block_sequence_thread = QThread()
+        self.block_sequence = BlockSequence()
+        self.block_sequence.moveToThread(self.block_sequence_thread)
+
+        self.block_sequence.moveToThread(self.block_sequence_thread)
+        self.block_sequence_thread.started.connect(self.block_sequence.run)
+        self.block_sequence.item_added.connect(self.add_to_buffer)
+
+        self.block_sequence.finished.connect(self.block_sequence.deleteLater)
+
+        self.block_sequence_thread.finished.connect(
+            self.block_sequence_thread.deleteLater
+        )
+        self.block_sequence.finished.connect(self.on_buffer_built)
+
     # Qt Events
     def closeEvent(self, event) -> None:
         """
@@ -166,6 +207,8 @@ class RandomKeyDialog(QMainWindow):
         """
         print("App Closing...")
         self._save_values()
+        self.block_sequence.stop()
+        self.block_sequence_thread.quit()
         super().closeEvent(event)
 
     # Init methods
@@ -203,9 +246,34 @@ class RandomKeyDialog(QMainWindow):
             % __version__,
         )
 
+    def on_icons_built(self):
+        """
+        Callback for UI Setup when icon previews have been built for the ItemWidget's
+        """
+
+        pass
+
+    def on_buffer_built(self):
+        """
+        Callback for Sequence generation completed.
+        """
+        self.preview_required()
+
     def add_to_buffer(self, item: str):
+        """
+        Callback from BlockSequence when the next item has been generated.
+
+        Add the item to buffer and add it to the display preview
+        :param item:
+        :return:
+        """
+
+        self._block_counts[item] += 1
 
         self.buffer.append(item)
+
+        item_path = self.palette.get(item)
+        self.add_item_to_preview(item_path)
 
     def on_item_icons_generated(self, index: int, icon: QIcon) -> None:
         """
@@ -299,7 +367,61 @@ class RandomKeyDialog(QMainWindow):
             label.setPixmap(pixmap)
             self.ui.preview_layout.addWidget(label)
 
-    def on_values_changed(self, widget):
+    def clear_preview(self):
+        """
+        Clear the block Previews layout of items.
+        :return:
+        """
+
+        # Clear the layout
+        while self.ui.preview_layout.count():
+            item = self.ui.preview_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+    def add_item_to_preview(
+        self, path: str, image_size: int = 64, layout=None, text=None
+    ) -> None:
+        """
+        Add an Image to the Block Previews Layout.
+        :param path:
+        :param image_size:
+        :return:
+        """
+
+        if not layout:
+            layout = self.ui.preview_layout
+
+        label = QLabel()
+        label.setFixedSize(image_size, image_size)
+        pixmap = QPixmap(path).scaled(image_size, image_size, Qt.IgnoreAspectRatio)
+
+        if text:
+
+            font = QFont("Arial", 12, QFont.Bold)
+
+            height = 0
+
+            for i in text:
+
+                draw_text_with_outline_on_pixmap(
+                    pixmap, i, pos=(0, 16 + height), font=font
+                )
+
+                height += 16
+
+            # painter.setRenderHint(QPainter.Antialiasing)
+            # painter.setPen(QColor("white"))
+            # painter.setFont(QFont("Arial", 12, QFont.Bold))
+            # rect = pixmap.rect()
+            # painter.drawText(rect, Qt.AlignCenter, str(text))
+            # painter.end()
+
+        label.setPixmap(pixmap)
+        layout.addWidget(label)
+
+    def on_values_changed(self, widget: ItemParameterWidget):
         """
         Callback method for any items widget values changed.
         :param widget:
@@ -308,6 +430,37 @@ class RandomKeyDialog(QMainWindow):
 
         self._generate_buffer()
 
+    def preview_required(self):
+
+        while self.ui.required_layout.count():
+            item = self.ui.required_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Re order to match counts with UI order
+        key_order = [item.item_name for item in self._item_widgets]
+        ordered_by_value = OrderedDict(
+            (key, self._block_counts[key])
+            for key in key_order
+            if key in self._block_counts
+        )
+
+        for k, count in ordered_by_value.items():
+            item_path = self.palette.get(k)
+            percent = int((count / len(self.buffer)) * 100)
+
+            whole = count // 64
+            remainder = count % 64
+            stack = f"{whole} Stacks"
+            if whole == 1:
+                stack = f"{whole} Stack"
+
+            text = [stack, f"& {remainder}", f"{percent}%"]
+            self.add_item_to_preview(
+                item_path, image_size=64, layout=self.ui.required_layout, text=text
+            )
+
     def _generate_buffer(self, *args) -> None:
         """
         Build the buffer and update the UI with new values.
@@ -315,12 +468,28 @@ class RandomKeyDialog(QMainWindow):
         :return:
         """
 
-        self.buffer = self.build_rule()
+        self.setup_sequence_worker()
+
+        # Reset the buffers and previews
+        self.clear_preview()
+        self.buffer = []
+
+        print(self._block_counts)
+        self._block_counts = defaultdict(int)
+
+        # Define new rule set
+        rule_set = self.build_rule()
+        max_length = self.ui.max_height_spinbox.value()
+
+        # Start the processing on thread
+        self.block_sequence.set_params(rule_set, max_length)
+
+        self.block_sequence_thread.start()
+
         self._current_index = 0
         self.ui.progress.setRange(0, len(self.buffer))
 
         self.update_displays()
-        self.draw_palette_from_buffer()
 
     def build_rule(self) -> list[int]:
         """
@@ -349,8 +518,7 @@ class RandomKeyDialog(QMainWindow):
             )
             items_list.append(item)
 
-        seq = BlockSequence(items_list, self.ui.max_height_spinbox.value())
-        return seq.run()
+        return items_list
 
     @property
     def last_item(self) -> (str, int):
@@ -426,10 +594,11 @@ class RandomKeyDialog(QMainWindow):
             self.simulate_keypress(key)
         self.update_displays()
 
-    def get_key_for_item(self, item: str) -> str:
+    def get_key_for_item(self, item: str) -> str | None:
         for i in self._item_widgets:
             if i.item_name == item:
                 return str(i._key)
+        return None
 
     @staticmethod
     def simulate_keypress(key: str) -> None:
@@ -440,3 +609,41 @@ class RandomKeyDialog(QMainWindow):
         """
         keyboard.press(key)
         keyboard.release(key)
+
+
+def draw_text_with_outline_on_pixmap(
+    pixmap,
+    text,
+    pos=(20, 50),
+    font=QFont("Arial", 20, QFont.Bold),
+    text_color="white",
+    outline_color="black",
+    outline_width=2,
+    shadow_offset=(2, 2),
+    shadow_color="gray",
+):
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setFont(font)
+
+    x, y = pos
+    path = QPainterPath()
+    path.addText(QPointF(x, y), font, text)
+
+    # Draw shadow
+    painter.setPen(QColor(shadow_color))
+    painter.drawText(x + shadow_offset[0], y + shadow_offset[1], text)
+
+    # Draw outline using QPen
+    outline_pen = QPen(QColor(outline_color))
+    outline_pen.setWidth(outline_width)
+    painter.setPen(outline_pen)
+    painter.setBrush(Qt.NoBrush)
+    painter.drawPath(path)
+
+    # Draw text fill
+    painter.setPen(QColor(text_color))
+    painter.drawText(x, y, text)
+
+    painter.end()
+    return pixmap

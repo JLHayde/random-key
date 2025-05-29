@@ -1,4 +1,5 @@
 import random
+import time
 from collections import defaultdict, Counter
 import math
 from dataclasses import dataclass, field
@@ -129,27 +130,36 @@ def weighted_bool_from_range(start: int, end: int) -> bool:
 class BlockSequence(QtCore.QObject):
 
     item_added = QtCore.Signal(str)
+    stopped = QtCore.Signal()
+    finished = QtCore.Signal()
 
-    def __init__(self, items=[], length=1):
+    def __init__(self):
         super().__init__()
-        self.items: list[ItemSequence] = items
-        self.length: int = length
+        self.items: list[ItemSequence] = []
+        self.length: int = 1
+        self._items: dict[str, ItemSequence] = {}
 
-        self._items: dict[str, ItemSequence] = {i.item_name: i for i in items}
-
+        self._running = False
         self._stop_flag = False
 
     def set_params(self, items, length):
         self.items = items
         self.length = length
+        self._items: dict[str, ItemSequence] = {i.item_name: i for i in items}
 
     def stop(self):
 
         self._stop_flag = True
 
+    @property
+    def running(self):
+
+        return self._running
+
     def run(self):
 
         self._stop_flag = False
+        self._running = True
 
         sequence = []
         index = 1
@@ -166,8 +176,11 @@ class BlockSequence(QtCore.QObject):
         last_item = None
         last_item_avoids = []
 
+        # slight delay so the UI Responds nicely
+        signal_delay = 0.0001
+
         sequence.append(current_item)
-        self.item_added.emit(sequence)
+        self.item_added.emit(current_item)
         while len(sequence) <= self.length - 1 and not self._stop_flag:
 
             # Check that current item does not neighbour last item
@@ -178,6 +191,7 @@ class BlockSequence(QtCore.QObject):
                     sequence.append(current_item)
                     self.item_added.emit(current_item)
                     index += 1
+                    time.sleep(signal_delay)
                     continue
 
                 elif index <= max_item_entropy:
@@ -190,6 +204,7 @@ class BlockSequence(QtCore.QObject):
                         sequence.append(current_item)
                         self.item_added.emit(current_item)
                         index += 1
+                        time.sleep(signal_delay)
                     continue
 
                 else:
@@ -197,6 +212,7 @@ class BlockSequence(QtCore.QObject):
                     last_item_avoids = current_avoids
 
             # Reset current item so it's not the same as the last item
+            # Also Respect the items probability too.
             while current_item := random.choices(target_keys, weights=weights, k=1)[0]:
                 if current_item != last_item:
                     break
@@ -206,4 +222,10 @@ class BlockSequence(QtCore.QObject):
             current_avoids = self._items[current_item].avoids
             index = 1
 
-        return sequence
+        if self._stop_flag:
+            self.stopped.emit()
+
+        self._running = False
+
+        self.finished.emit()
+        print("Finished")
