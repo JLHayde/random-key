@@ -8,12 +8,14 @@ from PySide6.QtGui import QPixmap, QIcon, QPainter, QColor, QFont, QPainterPath,
 from PySide6.QtCore import Qt, QSettings, QThread, QObject, Signal, QPointF
 
 from pynput import mouse
+from pynput import keyboard as py_keyboard
 import keyboard
 
 from .ui.dialog import AppDialog
 from .ui.item_widget import ItemParameterWidget
 from .sequences import ItemSequence, BlockSequence
 from .constants import APP_NAME, GROUP_NAME, REMAP_ITEMS
+from .overlay import OverlayWindow
 
 settings = QSettings(GROUP_NAME, APP_NAME)
 
@@ -54,14 +56,14 @@ class RandomKeyDialog(QMainWindow):
         self._item_widgets: list[ItemParameterWidget] = []
         self._current_index = 0
         self._max_index = 0
-        self.active = True
+        self.active = False
         self.buffer: list[str] = []
         self.palette = self._build_palette()
         self._block_counts = defaultdict(int)
 
         # Mouse Listener
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
-
+        keyboard.add_hotkey("ctrl", self.toggle_listener)
         rows, cols = 3, 3
         for index in range(0, rows * cols):
             row = index // cols
@@ -105,6 +107,25 @@ class RandomKeyDialog(QMainWindow):
         self.setCentralWidget(self.ui)
         self.create_menu_bar()
 
+        self.overlay_widget = OverlayWindow.find_game_window()
+        self.update_overlay()
+
+    def update_overlay(self):
+        text = "Active" if self.active else "Inactive"
+        text += "\nCurrent: %s" % self.current_item
+        text += "\nNext: %s" % self.next_item
+        self.overlay_widget.set_text(text)
+
+    def toggle_listener(self):
+        """
+        Callback for toggle hot key, Updates the UI state.
+        :return:
+        """
+
+        self.active = not self.active
+        self.ui.stop_start_button.click()
+        self.update_overlay()
+
     def on_stop_start_button(self, state: bool):
         """
         Callback for when the start button is clicked.
@@ -112,6 +133,8 @@ class RandomKeyDialog(QMainWindow):
         :param state:
         :return:
         """
+
+        self.active = state
 
         if state:
             self.ui.stop_start_button.setText("Stop")
@@ -249,15 +272,17 @@ class RandomKeyDialog(QMainWindow):
     def on_icons_built(self):
         """
         Callback for UI Setup when icon previews have been built for the ItemWidget's
+        item list.
         """
 
         pass
 
     def on_buffer_built(self):
         """
-        Callback for Sequence generation completed.
+        Callback for Sequence generation completed from QThread.
         """
-        self.preview_required()
+        self.ui.progress.setRange(0, len(self.buffer))
+        self.display_item_requirments()
 
     def add_to_buffer(self, item: str):
         """
@@ -269,7 +294,6 @@ class RandomKeyDialog(QMainWindow):
         """
 
         self._block_counts[item] += 1
-
         self.buffer.append(item)
 
         item_path = self.palette.get(item)
@@ -430,7 +454,7 @@ class RandomKeyDialog(QMainWindow):
 
         self._generate_buffer()
 
-    def preview_required(self):
+    def display_item_requirments(self):
 
         while self.ui.required_layout.count():
             item = self.ui.required_layout.takeAt(0)
@@ -500,7 +524,7 @@ class RandomKeyDialog(QMainWindow):
         items_list = []
 
         for x, item_widget in enumerate(self._item_widgets):
-            if not item_widget.slider.isEnabled():
+            if not item_widget.is_active:
                 continue
 
             item_name = item_widget.item_name
@@ -532,7 +556,7 @@ class RandomKeyDialog(QMainWindow):
     def current_item(self) -> (str, int):
 
         if self._current_index > len(self.buffer) - 1:
-            return "", 0
+            return ""
         else:
             return self.buffer[self._current_index]
 
@@ -540,7 +564,7 @@ class RandomKeyDialog(QMainWindow):
     def next_item(self) -> (str, int):
 
         if self._current_index + 1 > len(self.buffer) - 1:
-            return "", 0
+            return ""
         else:
             return self.buffer[self._current_index + 1]
 
@@ -576,6 +600,7 @@ class RandomKeyDialog(QMainWindow):
 
         if not pressed and button == mouse.Button.right and self.active:
             self.increment_buffer()
+            self.update_overlay()
 
     def increment_buffer(self) -> None:
         """
